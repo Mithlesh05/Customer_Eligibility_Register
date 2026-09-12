@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { GOOGLE_CLIENT_ID } from '../googleConfig'
 
 const SCOPE = 'https://www.googleapis.com/auth/calendar.events'
 const EVENTS_URL =
@@ -6,7 +7,7 @@ const EVENTS_URL =
 const TOKEN_KEY = 'google_cal_access_token'
 const EXPIRY_KEY = 'google_cal_token_expiry'
 
-const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+const CLIENT_ID = GOOGLE_CLIENT_ID
 
 function isPlaceholderClientId(id) {
   return !id || id.includes('YOUR_GOOGLE_CLIENT_ID')
@@ -107,7 +108,7 @@ export function useGoogleCalendar(onConnectResult) {
           onConnectResultRef.current?.({
             ok: false,
             error:
-              'Google sign-in could not open. Allow pop-ups for http://localhost:5173 and try again.',
+              'Google sign-in could not open. Allow pop-ups for this site and try again.',
           })
         },
       })
@@ -128,6 +129,14 @@ export function useGoogleCalendar(onConnectResult) {
   }, [clientIdMissing])
 
   const connect = useCallback(() => {
+    if (!tokenClientRef.current) {
+      onConnectResultRef.current?.({
+        ok: false,
+        error:
+          'Google sign-in is still loading. Wait a second and try Connect Calendar again.',
+      })
+      return
+    }
     finishedRef.current = false
     tokenClientRef.current.requestAccessToken()
     setConnecting(true)
