@@ -1,11 +1,25 @@
 import { useCallback, useEffect, useState } from 'react'
 import { addMonths, todayStr } from '../utils/dates'
 
-const STORAGE_KEY = 'customers-data'
+const LEGACY_STORAGE_KEY = 'customers-data'
 
-function loadCustomers() {
+function storageKeyFor(userId) {
+  return `customers-data:${userId}`
+}
+
+function loadCustomers(userId) {
+  if (!userId) return []
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const key = storageKeyFor(userId)
+    let raw = localStorage.getItem(key)
+    if (!raw) {
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
+      if (legacy) {
+        localStorage.setItem(key, legacy)
+        localStorage.removeItem(LEGACY_STORAGE_KEY)
+        raw = legacy
+      }
+    }
     if (!raw) return []
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed) ? parsed : []
@@ -14,8 +28,9 @@ function loadCustomers() {
   }
 }
 
-function persist(customers) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(customers))
+function persist(userId, customers) {
+  if (!userId) return
+  localStorage.setItem(storageKeyFor(userId), JSON.stringify(customers))
 }
 
 function makeId() {
@@ -26,14 +41,19 @@ function makeId() {
 }
 
 /**
- * CRUD + localStorage persistence for customer eligibility entries.
+ * CRUD + per-user localStorage persistence for customer eligibility entries.
  */
-export function useCustomers() {
-  const [customers, setCustomers] = useState(loadCustomers)
+export function useCustomers(userId) {
+  const [customers, setCustomers] = useState(() => loadCustomers(userId))
 
   useEffect(() => {
-    persist(customers)
-  }, [customers])
+    setCustomers(loadCustomers(userId))
+  }, [userId])
+
+  useEffect(() => {
+    if (!userId) return
+    persist(userId, customers)
+  }, [customers, userId])
 
   const addCustomer = useCallback((input) => {
     const addedDate = todayStr()

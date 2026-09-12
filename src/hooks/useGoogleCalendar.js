@@ -4,8 +4,6 @@ import { GOOGLE_CLIENT_ID } from '../googleConfig'
 const SCOPE = 'https://www.googleapis.com/auth/calendar.events'
 const EVENTS_URL =
   'https://www.googleapis.com/calendar/v3/calendars/primary/events'
-const TOKEN_KEY = 'google_cal_access_token'
-const EXPIRY_KEY = 'google_cal_token_expiry'
 
 const CLIENT_ID = GOOGLE_CLIENT_ID
 
@@ -13,52 +11,74 @@ function isPlaceholderClientId(id) {
   return !id || id.includes('YOUR_GOOGLE_CLIENT_ID')
 }
 
-function readStoredToken() {
-  const token = sessionStorage.getItem(TOKEN_KEY)
-  const expiry = Number(sessionStorage.getItem(EXPIRY_KEY) || 0)
+function tokenKeys(userId) {
+  const suffix = userId ? `:${userId}` : ''
+  return {
+    token: `google_cal_access_token${suffix}`,
+    expiry: `google_cal_token_expiry${suffix}`,
+  }
+}
+
+function readStoredToken(userId) {
+  if (!userId) return { token: null, expiry: 0 }
+  const keys = tokenKeys(userId)
+  const token = sessionStorage.getItem(keys.token)
+  const expiry = Number(sessionStorage.getItem(keys.expiry) || 0)
   if (!token || !expiry || expiry <= Date.now()) {
-    sessionStorage.removeItem(TOKEN_KEY)
-    sessionStorage.removeItem(EXPIRY_KEY)
+    sessionStorage.removeItem(keys.token)
+    sessionStorage.removeItem(keys.expiry)
     return { token: null, expiry: 0 }
   }
   return { token, expiry }
 }
 
-function saveToken(token, expiresInSeconds) {
+function saveToken(userId, token, expiresInSeconds) {
+  if (!userId) return
+  const keys = tokenKeys(userId)
   const expiry = Date.now() + Math.max(0, Number(expiresInSeconds) - 60) * 1000
-  sessionStorage.setItem(TOKEN_KEY, token)
-  sessionStorage.setItem(EXPIRY_KEY, String(expiry))
+  sessionStorage.setItem(keys.token, token)
+  sessionStorage.setItem(keys.expiry, String(expiry))
 }
 
-function clearToken() {
-  sessionStorage.removeItem(TOKEN_KEY)
-  sessionStorage.removeItem(EXPIRY_KEY)
+function clearToken(userId) {
+  if (!userId) return
+  const keys = tokenKeys(userId)
+  sessionStorage.removeItem(keys.token)
+  sessionStorage.removeItem(keys.expiry)
 }
 
 /**
  * Frontend-only Google Calendar authorization via GIS oauth2 token client.
- * This is Calendar API authorization (initTokenClient), not Sign in with
- * Google (google.accounts.id). No authorization-code, no client secret,
- * no backend, no popup.closed polling in our code.
+ * Separate from Sign in with Google (google.accounts.id).
  */
-export function useGoogleCalendar(onConnectResult) {
+export function useGoogleCalendar(userId, onConnectResult) {
   const clientIdMissing = isPlaceholderClientId(CLIENT_ID)
   const [accessToken, setAccessToken] = useState(
-    () => readStoredToken().token,
+    () => readStoredToken(userId).token,
   )
   const [connecting, setConnecting] = useState(false)
   const [gisReady, setGisReady] = useState(false)
   const tokenClientRef = useRef(null)
   const onConnectResultRef = useRef(onConnectResult)
   const finishedRef = useRef(false)
+  const userIdRef = useRef(userId)
   onConnectResultRef.current = onConnectResult
+  userIdRef.current = userId
 
   const connected = Boolean(accessToken)
 
   useEffect(() => {
-    if (clientIdMissing) return undefined
+    setAccessToken(readStoredToken(userId).token)
+    setConnecting(false)
+    finishedRef.current = false
+  }, [userId])
+
+  useEffect(() => {
+    if (clientIdMissing || !userId) return undefined
 
     let intervalId = 0
+    tokenClientRef.current = null
+    setGisReady(false)
 
     const start = () => {
       const oauth2 = window.google?.accounts?.oauth2
@@ -91,10 +111,8 @@ export function useGoogleCalendar(onConnectResult) {
             })
             return
           }
-          saveToken(
-            response.access_token,
-            Number(response.expires_in || 3600),
-          )
+          const uid = userIdRef.current
+          saveToken(uid, response.access_token, Number(response.expires_in || 3600))
           setAccessToken(response.access_token)
           onConnectResultRef.current?.({ ok: true })
         },
@@ -108,7 +126,7 @@ export function useGoogleCalendar(onConnectResult) {
           onConnectResultRef.current?.({
             ok: false,
             error:
-              'Google sign-in could not open. Allow pop-ups for this site and try again.',
+              'Google Calendar could not open. Allow pop-ups for this site and try again.',
           })
         },
       })
@@ -126,14 +144,14 @@ export function useGoogleCalendar(onConnectResult) {
       window.clearInterval(intervalId)
       tokenClientRef.current = null
     }
-  }, [clientIdMissing])
+  }, [clientIdMissing, userId])
 
   const connect = useCallback(() => {
     if (!tokenClientRef.current) {
       onConnectResultRef.current?.({
         ok: false,
         error:
-          'Google sign-in is still loading. Wait a second and try Connect Calendar again.',
+          'Google Calendar is still loading. Wait a second and try Connect Calendar again.',
       })
       return
     }
@@ -142,9 +160,14 @@ export function useGoogleCalendar(onConnectResult) {
     setConnecting(true)
   }, [])
 
+  const disconnect = useCallback(() => {
+    clearToken(userId)
+    setAccessToken(null)
+  }, [userId])
+
   const createReminderEvent = useCallback(
     async (customer) => {
-      const token = accessToken || readStoredToken().token
+      const token = accessToken || readStoredToken(userId).token
       if (!token) {
         return {
           ok: false,
@@ -186,7 +209,7 @@ export function useGoogleCalendar(onConnectResult) {
         })
 
         if (res.status === 401 || res.status === 403) {
-          clearToken()
+          clearToken(userId)
           setAccessToken(null)
           return {
             ok: false,
@@ -218,7 +241,7 @@ export function useGoogleCalendar(onConnectResult) {
         }
       }
     },
-    [accessToken],
+    [accessToken, userId],
   )
 
   return {
@@ -227,6 +250,7 @@ export function useGoogleCalendar(onConnectResult) {
     gisReady,
     clientIdMissing,
     connect,
+    disconnect,
     createReminderEvent,
   }
 }

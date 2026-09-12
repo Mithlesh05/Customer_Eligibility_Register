@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from 'react'
-import { CalendarCheck, Loader2, Sparkles } from 'lucide-react'
+import { CalendarCheck, Loader2, LogOut, Sparkles } from 'lucide-react'
 import EntryForm from './components/EntryForm'
+import LoginScreen from './components/LoginScreen'
 import ReminderSection from './components/ReminderSection'
 import Toast from './components/Toast'
 import { useCustomers } from './hooks/useCustomers'
+import { useGoogleAuth } from './hooks/useGoogleAuth'
 import { useGoogleCalendar } from './hooks/useGoogleCalendar'
 import { daysBetween, todayStr } from './utils/dates'
 
@@ -39,13 +41,37 @@ function groupCustomers(customers) {
 
 export default function App() {
   const {
+    user,
+    gisReady: authReady,
+    clientIdMissing,
+    error: authError,
+    buttonHostRef,
+    signOut,
+  } = useGoogleAuth()
+
+  if (!user) {
+    return (
+      <LoginScreen
+        buttonHostRef={buttonHostRef}
+        gisReady={authReady}
+        clientIdMissing={clientIdMissing}
+        error={authError}
+      />
+    )
+  }
+
+  return <RegisterApp user={user} onSignOut={signOut} />
+}
+
+function RegisterApp({ user, onSignOut }) {
+  const {
     customers,
     addCustomer,
     markDone,
     reopen,
     removeCustomer,
     markCalendarSynced,
-  } = useCustomers()
+  } = useCustomers(user.id)
 
   const [toast, setToast] = useState(null)
   const groups = useMemo(() => groupCustomers(customers), [customers])
@@ -74,8 +100,14 @@ export default function App() {
     gisReady,
     clientIdMissing,
     connect,
+    disconnect,
     createReminderEvent,
-  } = useGoogleCalendar(onConnectResult)
+  } = useGoogleCalendar(user.id, onConnectResult)
+
+  const handleSignOut = useCallback(() => {
+    disconnect()
+    onSignOut()
+  }, [disconnect, onSignOut])
 
   const syncToCalendar = useCallback(
     async (entry) => {
@@ -134,31 +166,60 @@ export default function App() {
               </span>
             </div>
 
-            {connected ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/15 px-3 py-1.5 text-xs font-medium text-emerald-200 ring-1 ring-emerald-400/20">
-                <CalendarCheck className="h-3.5 w-3.5" />
-                Calendar on
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={connect}
-                disabled={!gisReady || clientIdMissing}
-                title={
-                  clientIdMissing
-                    ? 'Add VITE_GOOGLE_CLIENT_ID in .env, then restart the app.'
-                    : !gisReady
-                      ? 'Google sign-in is still loading…'
-                      : undefined
-                }
-                className="inline-flex items-center gap-2 rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold text-ink transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {connecting ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : null}
-                Connect Calendar
-              </button>
-            )}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {connected ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/15 px-3 py-1.5 text-xs font-medium text-emerald-200 ring-1 ring-emerald-400/20">
+                  <CalendarCheck className="h-3.5 w-3.5" />
+                  Calendar on
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={connect}
+                  disabled={!gisReady || clientIdMissing}
+                  title={
+                    clientIdMissing
+                      ? 'Add VITE_GOOGLE_CLIENT_ID in .env, then restart the app.'
+                      : !gisReady
+                        ? 'Google Calendar is still loading…'
+                        : undefined
+                  }
+                  className="inline-flex items-center gap-2 rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold text-ink transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {connecting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : null}
+                  Connect Calendar
+                </button>
+              )}
+
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/10 py-1 pl-1 pr-2 ring-1 ring-white/15">
+                {user.picture ? (
+                  <img
+                    src={user.picture}
+                    alt=""
+                    className="h-7 w-7 rounded-full"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/40 text-[10px] font-semibold">
+                    {(user.name || '?').slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <span className="hidden max-w-[9rem] truncate text-xs text-white/80 sm:inline">
+                  {user.name || user.email}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white"
+                  title="Sign out"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span className="sm:inline">Out</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-200/80">
