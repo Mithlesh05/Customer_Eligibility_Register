@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { addMonths, todayStr } from '../utils/dates'
+import { addMonths, normalizeTime, todayStr } from '../utils/dates'
 
 const LEGACY_STORAGE_KEY = 'customers-data'
 
@@ -72,6 +72,7 @@ export function useCustomers(userId) {
       notes: (input.notes || '').trim(),
       addedDate,
       reminderDate,
+      reminderTime: normalizeTime(input.reminderTime),
       status: 'pending',
       calendarSynced: false,
     }

@@ -8,6 +8,7 @@ const EMPTY_FORM = {
   reason: '',
   waitMode: '2m',
   customDate: '',
+  reminderTime: '09:00',
   notes: '',
 }
 
@@ -57,6 +58,7 @@ export default function EntryForm({ onSubmit }) {
       notes: form.notes,
       waitMode: form.waitMode,
       reminderDate: form.waitMode === 'custom' ? form.customDate : '',
+      reminderTime: form.reminderTime || '09:00',
     })
     setForm(EMPTY_FORM)
     setError('')
@@ -161,6 +163,22 @@ export default function EntryForm({ onSubmit }) {
             />
           )}
         </fieldset>
+
+        <div>
+          <label htmlFor="cust-time" className={labelClass}>
+            Notification time
+          </label>
+          <input
+            id="cust-time"
+            type="time"
+            value={form.reminderTime}
+            onChange={(e) => update('reminderTime', e.target.value)}
+            className={fieldClass}
+          />
+          <p className="mt-1.5 text-xs text-muted">
+            Calendar will notify at this time on the reminder date.
+          </p>
+        </div>
 
         <div>
           <label htmlFor="cust-notes" className={labelClass}>

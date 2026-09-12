@@ -78,3 +78,27 @@ export function nextDay(dateStr) {
   d.setDate(d.getDate() + 1)
   return toIso(d.getFullYear(), d.getMonth() + 1, d.getDate())
 }
+
+/** Normalize input time to HH:MM (24-hour). Defaults to 09:00. */
+export function normalizeTime(timeStr) {
+  const match = String(timeStr || '').match(/^(\d{1,2}):(\d{2})/)
+  if (!match) return '09:00'
+  const hours = Math.min(23, Math.max(0, Number(match[1])))
+  const minutes = Math.min(59, Math.max(0, Number(match[2])))
+  return `${pad2(hours)}:${pad2(minutes)}`
+}
+
+/** e.g. "9:00 AM" */
+export function formatTime(timeStr) {
+  const [hours, minutes] = normalizeTime(timeStr).split(':').map(Number)
+  const period = hours >= 12 ? 'PM' : 'AM'
+  const hour12 = hours % 12 || 12
+  return `${hour12}:${pad2(minutes)} ${period}`
+}
+
+/** Add minutes to HH:MM, staying on the same calendar day. */
+export function addMinutesToTime(timeStr, minutesToAdd) {
+  const [hours, minutes] = normalizeTime(timeStr).split(':').map(Number)
+  const total = Math.min(23 * 60 + 59, hours * 60 + minutes + minutesToAdd)
+  return `${pad2(Math.floor(total / 60))}:${pad2(total % 60)}`
+}

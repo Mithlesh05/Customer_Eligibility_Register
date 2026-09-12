@@ -83,6 +83,7 @@ function RegisterApp({ user, onSignOut }) {
   const onConnectResult = useCallback(
     (result) => {
       if (result.ok) {
+        if (result.silent) return
         showToast(
           'Google Calendar is connected. New reminders will notify you on your phone.',
           'success',
@@ -102,7 +103,7 @@ function RegisterApp({ user, onSignOut }) {
     connect,
     disconnect,
     createReminderEvent,
-  } = useGoogleCalendar(user.id, onConnectResult)
+  } = useGoogleCalendar(user.id, user.email, onConnectResult)
 
   const handleSignOut = useCallback(() => {
     disconnect()

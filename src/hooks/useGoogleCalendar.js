@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { GOOGLE_CLIENT_ID } from '../googleConfig'
+import { addMinutesToTime, normalizeTime } from '../utils/dates'
 
 const SCOPE = 'https://www.googleapis.com/auth/calendar.events'
 const EVENTS_URL =
@@ -16,15 +16,37 @@ function tokenKeys(userId) {
   return {
     token: `google_cal_access_token${suffix}`,
     expiry: `google_cal_token_expiry${suffix}`,
+    granted: `google_cal_granted${suffix}`,
   }
+}
+
+function grantedKey(userId) {
+  return tokenKeys(userId).granted
+}
+
+function hasGrantedCalendar(userId) {
+  if (!userId) return false
+  return localStorage.getItem(grantedKey(userId)) === '1'
+}
+
+function markGranted(userId) {
+  if (!userId) return
+  localStorage.setItem(grantedKey(userId), '1')
 }
 
 function readStoredToken(userId) {
   if (!userId) return { token: null, expiry: 0 }
   const keys = tokenKeys(userId)
-  const token = sessionStorage.getItem(keys.token)
-  const expiry = Number(sessionStorage.getItem(keys.expiry) || 0)
+  const token =
+    localStorage.getItem(keys.token) || sessionStorage.getItem(keys.token)
+  const expiry = Number(
+    localStorage.getItem(keys.expiry) ||
+      sessionStorage.getItem(keys.expiry) ||
+      0,
+  )
   if (!token || !expiry || expiry <= Date.now()) {
+    localStorage.removeItem(keys.token)
+    localStorage.removeItem(keys.expiry)
     sessionStorage.removeItem(keys.token)
     sessionStorage.removeItem(keys.expiry)
     return { token: null, expiry: 0 }
@@ -36,13 +58,16 @@ function saveToken(userId, token, expiresInSeconds) {
   if (!userId) return
   const keys = tokenKeys(userId)
   const expiry = Date.now() + Math.max(0, Number(expiresInSeconds) - 60) * 1000
-  sessionStorage.setItem(keys.token, token)
-  sessionStorage.setItem(keys.expiry, String(expiry))
+  localStorage.setItem(keys.token, token)
+  localStorage.setItem(keys.expiry, String(expiry))
+  markGranted(userId)
 }
 
 function clearToken(userId) {
   if (!userId) return
   const keys = tokenKeys(userId)
+  localStorage.removeItem(keys.token)
+  localStorage.removeItem(keys.expiry)
   sessionStorage.removeItem(keys.token)
   sessionStorage.removeItem(keys.expiry)
 }
@@ -51,7 +76,7 @@ function clearToken(userId) {
  * Frontend-only Google Calendar authorization via GIS oauth2 token client.
  * Separate from Sign in with Google (google.accounts.id).
  */
-export function useGoogleCalendar(userId, onConnectResult) {
+export function useGoogleCalendar(userId, userEmail, onConnectResult) {
   const clientIdMissing = isPlaceholderClientId(CLIENT_ID)
   const [accessToken, setAccessToken] = useState(
     () => readStoredToken(userId).token,
@@ -61,9 +86,13 @@ export function useGoogleCalendar(userId, onConnectResult) {
   const tokenClientRef = useRef(null)
   const onConnectResultRef = useRef(onConnectResult)
   const finishedRef = useRef(false)
+  const silentRef = useRef(false)
+  const silentTriedRef = useRef(false)
   const userIdRef = useRef(userId)
+  const userEmailRef = useRef(userEmail)
   onConnectResultRef.current = onConnectResult
   userIdRef.current = userId
+  userEmailRef.current = userEmail
 
   const connected = Boolean(accessToken)
 
@@ -71,6 +100,7 @@ export function useGoogleCalendar(userId, onConnectResult) {
     setAccessToken(readStoredToken(userId).token)
     setConnecting(false)
     finishedRef.current = false
+    silentTriedRef.current = false
   }, [userId])
 
   useEffect(() => {
@@ -90,9 +120,12 @@ export function useGoogleCalendar(userId, onConnectResult) {
         client_id: CLIENT_ID,
         scope: SCOPE,
         callback: (response) => {
+          const silent = silentRef.current
+          silentRef.current = false
           finishedRef.current = true
           setConnecting(false)
           if (response.error) {
+            if (silent) return
             const cancelled =
               response.error === 'access_denied' ||
               response.error === 'popup_closed_by_user'
@@ -105,6 +138,7 @@ export function useGoogleCalendar(userId, onConnectResult) {
             return
           }
           if (!response.access_token) {
+            if (silent) return
             onConnectResultRef.current?.({
               ok: false,
               error: 'Google did not return an access token.',
@@ -114,14 +148,16 @@ export function useGoogleCalendar(userId, onConnectResult) {
           const uid = userIdRef.current
           saveToken(uid, response.access_token, Number(response.expires_in || 3600))
           setAccessToken(response.access_token)
-          onConnectResultRef.current?.({ ok: true })
+          onConnectResultRef.current?.({ ok: true, silent })
         },
         error_callback: (error) => {
+          const silent = silentRef.current
+          silentRef.current = false
           if (error?.type === 'popup_closed') {
             if (!finishedRef.current) setConnecting(false)
             return
           }
-          if (finishedRef.current) return
+          if (finishedRef.current || silent) return
           setConnecting(false)
           onConnectResultRef.current?.({
             ok: false,
@@ -146,6 +182,19 @@ export function useGoogleCalendar(userId, onConnectResult) {
     }
   }, [clientIdMissing, userId])
 
+  useEffect(() => {
+    if (!gisReady || !userId || !tokenClientRef.current) return
+    if (readStoredToken(userId).token) return
+    if (!hasGrantedCalendar(userId) || silentTriedRef.current) return
+    silentTriedRef.current = true
+    silentRef.current = true
+    finishedRef.current = false
+    tokenClientRef.current.requestAccessToken({
+      prompt: '',
+      hint: userEmailRef.current || undefined,
+    })
+  }, [gisReady, userId])
+
   const connect = useCallback(() => {
     if (!tokenClientRef.current) {
       onConnectResultRef.current?.({
@@ -156,7 +205,10 @@ export function useGoogleCalendar(userId, onConnectResult) {
       return
     }
     finishedRef.current = false
-    tokenClientRef.current.requestAccessToken()
+    silentRef.current = false
+    tokenClientRef.current.requestAccessToken({
+      hint: userEmailRef.current || undefined,
+    })
     setConnecting(true)
   }, [])
 
